@@ -1,0 +1,80 @@
+#+TITLE: pkg-run.el
+
+[[https://melpa.org/packages/pkg-run-badge.svg]] [[http://stable.melpa.org/packages/pkg-run-badge.svg]]
+
+An Emacs package for running package.json scripts with completion support and automatic package manager detection.
+
+* Features
+- Read scripts from package.json
+- Completion interface for script selection
+- Automatic package manager detection (pnpm/bun/npm)
+- Run scripts using Emacs compilation mode
+- Navigate up directory tree to find package.json
+
+* Install
+*Emacs 27.1 is required.*
+*** Melpa
+#+BEGIN_SRC emacs-lisp
+(use-package pkg-run
+  :ensure t
+  :bind (("C-c r" . pkg-run-script)))
+#+END_SRC
+
+*** quelpa
+#+BEGIN_SRC emacs-lisp
+(use-package pkg-run
+  :quelpa ((pkg-run :fetcher github :repo "darkawower/pkg-run") :upgrade t)
+  :bind (("C-c r" . pkg-run-script)))
+#+END_SRC
+
+*** Straight
+#+BEGIN_SRC emacs-lisp
+(use-package pkg-run
+  :straight (:host github :repo "darkawower/pkg-run")
+  :bind (("C-c r" . pkg-run-script)))
+#+END_SRC
+
+*** doom
+*packages.el*
+#+BEGIN_SRC emacs-lisp
+(package! pkg-run)
+;; or
+(package! pkg-run :recipe (:host github :repo "darkawower/pkg-run"))
+#+END_SRC
+
+*config.el*
+#+BEGIN_SRC emacs-lisp
+(use-package pkg-run
+  :bind (("C-c r" . pkg-run-script)))
+#+END_SRC
+
+* Usage
+Simply run ~M-x pkg-run-script~ or bind it to your preferred key combination. The package will:
+1. Find the nearest package.json in the current directory or parent directories
+2. Extract all scripts from the scripts section
+3. Present them in a completion interface
+4. Detect the package manager based on lock files (pnpm-lock.yaml, bun.lockb, or default to npm)
+5. Run the selected script using Emacs compilation mode
+
+* Customization
+**** Default package manager
+If you want to override automatic detection:
+=(setq pkg-run-default-package-manager 'pnpm)=
+
+Available options:
+- =nil= - Auto-detect (default)
+- ='pnpm= - Use pnpm
+- ='bun= - Use bun
+- ='npm= - Use npm
+
+* Package manager detection
+The package automatically detects the package manager based on lock files:
+- =pnpm-lock.yaml= → pnpm
+- =bun.lockb= → bun
+- Otherwise → npm (default)
+
+* Commands
+- ~pkg-run-script~ - Main command to select and run a package.json script
+
+* License
+GPL-3.0
