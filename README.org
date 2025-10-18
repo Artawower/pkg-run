@@ -1,7 +1,5 @@
 #+TITLE: pkg-run.el
 
-[[https://melpa.org/packages/pkg-run-badge.svg]] [[http://stable.melpa.org/packages/pkg-run-badge.svg]]
-
 An Emacs package for running package.json scripts with completion support and automatic package manager detection.
 
 * Features
@@ -13,39 +11,11 @@ An Emacs package for running package.json scripts with completion support and au
 
 * Install
 *Emacs 27.1 is required.*
-*** Melpa
+*** Straight/elpaca
 #+BEGIN_SRC emacs-lisp
 (use-package pkg-run
-  :ensure t
-  :bind (("C-c r" . pkg-run-script)))
-#+END_SRC
-
-*** quelpa
-#+BEGIN_SRC emacs-lisp
-(use-package pkg-run
-  :quelpa ((pkg-run :fetcher github :repo "darkawower/pkg-run") :upgrade t)
-  :bind (("C-c r" . pkg-run-script)))
-#+END_SRC
-
-*** Straight
-#+BEGIN_SRC emacs-lisp
-(use-package pkg-run
-  :straight (:host github :repo "darkawower/pkg-run")
-  :bind (("C-c r" . pkg-run-script)))
-#+END_SRC
-
-*** doom
-*packages.el*
-#+BEGIN_SRC emacs-lisp
-(package! pkg-run)
-;; or
-(package! pkg-run :recipe (:host github :repo "darkawower/pkg-run"))
-#+END_SRC
-
-*config.el*
-#+BEGIN_SRC emacs-lisp
-(use-package pkg-run
-  :bind (("C-c r" . pkg-run-script)))
+  :ensure (:host github :repo "Artawower/pkg-run")
+  :defer t)
 #+END_SRC
 
 * Usage
