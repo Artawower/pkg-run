@@ -4,7 +4,7 @@
 
 ;; Author: darkawower
 ;; URL: https://github.com/darkawower/pkg-run
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "27.1") (transient "0.3.0"))
 ;; Version: 0.1.0
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -29,6 +29,7 @@
 
 (require 'json)
 (require 'compile)
+(require 'transient)
 
 (defgroup pkg-run nil
   "Run package.json scripts with completion."
@@ -39,6 +40,15 @@
   "Default package manager to use (pnpm, bun, or npm).
 If nil, auto-detect based on lock files."
   :type '(choice (const :tag "Auto-detect" nil)
+                 (const :tag "pnpm" pnpm)
+                 (const :tag "bun" bun)
+                 (const :tag "npm" npm))
+  :group 'pkg-run)
+
+(defcustom pkg-run-package-manager nil
+  "Current package manager override.
+If non-nil, use this instead of auto-detection or default."
+  :type '(choice (const :tag "Use default" nil)
                  (const :tag "pnpm" pnpm)
                  (const :tag "bun" bun)
                  (const :tag "npm" npm))
@@ -64,7 +74,8 @@ If nil, auto-detect based on lock files."
 
 (defun pkg-run--detect-package-manager (project-root)
   "Detect package manager in PROJECT-ROOT based on lock files."
-  (or pkg-run-default-package-manager
+  (or pkg-run-package-manager
+      pkg-run-default-package-manager
       (cond
        ((file-exists-p (expand-file-name "pnpm-lock.yaml" project-root)) 'pnpm)
        ((file-exists-p (expand-file-name "bun.lockb" project-root)) 'bun)
@@ -95,6 +106,47 @@ If nil, auto-detect based on lock files."
              (default-directory project-root)
              (compile-command (format "%s %s" pm-cmd selected-script)))
         (compile compile-command)))))
+
+(defun pkg-run--package-manager-install-command (manager &optional flags)
+  "Return install command string for MANAGER with optional FLAGS."
+  (let ((base-cmd (pcase manager
+                    ('pnpm "pnpm install")
+                    ('bun "bun install")
+                    ('npm "npm install")
+                    (_ "npm install"))))
+    (if flags
+        (format "%s %s" base-cmd flags)
+      base-cmd)))
+
+;;;###autoload
+(defun pkg-run-install (&optional args)
+  "Install dependencies with optional ARGS from transient."
+  (interactive (list (transient-args 'pkg-run-menu)))
+  (let* ((project-root (pkg-run--find-package-json)))
+    (unless project-root
+      (user-error "No package.json found in current directory or parent directories"))
+    (let* ((package-manager (pkg-run--detect-package-manager project-root))
+           (default-directory project-root)
+           (flags (mapconcat 'identity args " "))
+           (compile-command (pkg-run--package-manager-install-command 
+                            package-manager 
+                            (if (string-empty-p flags) nil flags))))
+      (compile compile-command))))
+
+(transient-define-prefix pkg-run-menu ()
+  "Package.json operations menu."
+  ["Arguments"
+   ("-f" "Frozen lockfile" "--frozen-lockfile")]
+  ["Package Manager Operations"
+   ["Scripts"
+    ("r" "Run script" pkg-run-script)]
+   ["Install"
+    ("i" "Install dependencies" pkg-run-install)]]
+  (interactive)
+  (transient-setup 'pkg-run-menu))
+
+;;;###autoload
+(defalias 'pkg-run 'pkg-run-menu)
 
 (provide 'pkg-run)
 ;;; pkg-run.el ends here
