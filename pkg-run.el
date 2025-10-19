@@ -84,8 +84,8 @@ If non-nil, use this instead of auto-detection or default."
 (defun pkg-run--package-manager-command (manager)
   "Return command string for MANAGER (pnpm, bun, or npm)."
   (pcase manager
-    ('pnpm "pnpm")
-    ('bun "bun")
+    ('pnpm "pnpm run")
+    ('bun "bun run")
     ('npm "npm run")
     (_ "npm run")))
 
@@ -129,8 +129,8 @@ If non-nil, use this instead of auto-detection or default."
            (default-directory project-root)
            (flags (mapconcat 'identity args " "))
            (compile-command (pkg-run--package-manager-install-command 
-                            package-manager 
-                            (if (string-empty-p flags) nil flags))))
+                             package-manager 
+                             (if (string-empty-p flags) nil flags))))
       (compile compile-command))))
 
 (transient-define-prefix pkg-run-menu ()
