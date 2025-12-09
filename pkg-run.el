@@ -89,6 +89,20 @@ If non-nil, use this instead of auto-detection or default."
     ('npm "npm run")
     (_ "npm run")))
 
+(defun pkg-run--default-command-entries (package-manager scripts)
+  "Return default command entries for PACKAGE-MANAGER excluding SCRIPTS.
+Adds built-in package manager commands (like install) to the completion
+list even if they are not present in package.json. Currently includes
+only install without additional arguments."
+  (let (entries)
+    (unless (member "install" scripts)
+      (push (cons "install"
+                  (list :type 'default
+                        :command (pkg-run--package-manager-install-command
+                                  package-manager)))
+            entries))
+    (nreverse entries)))
+
 ;;;###autoload
 (defun pkg-run-script ()
   "Select and run a script from package.json using completion."
@@ -97,14 +111,21 @@ If non-nil, use this instead of auto-detection or default."
     (unless project-root
       (user-error "No package.json found in current directory or parent directories"))
     (let* ((package-json-path (expand-file-name "package.json" project-root))
-           (scripts (pkg-run--read-scripts package-json-path)))
-      (unless scripts
+           (scripts (or (pkg-run--read-scripts package-json-path) '()))
+           (package-manager (pkg-run--detect-package-manager project-root))
+           (pm-cmd (pkg-run--package-manager-command package-manager))
+           (candidates (append
+                        (mapcar (lambda (script)
+                                  (cons script (list :type 'script
+                                                     :command (format "%s %s" pm-cmd script))))
+                                scripts)
+                        (pkg-run--default-command-entries package-manager scripts))))
+      (unless candidates
         (user-error "No scripts found in package.json"))
-      (let* ((selected-script (completing-read "Select script: " scripts nil t))
-             (package-manager (pkg-run--detect-package-manager project-root))
-             (pm-cmd (pkg-run--package-manager-command package-manager))
+      (let* ((selected (completing-read "Select script: " candidates nil t))
+             (selected-meta (cdr (assoc selected candidates)))
              (default-directory project-root)
-             (compile-command (format "%s %s" pm-cmd selected-script)))
+             (compile-command (plist-get selected-meta :command)))
         (compile compile-command)))))
 
 (defun pkg-run--package-manager-install-command (manager &optional flags)

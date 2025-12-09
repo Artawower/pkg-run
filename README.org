@@ -4,6 +4,7 @@ An Emacs package for running package.json scripts with completion support and au
 
 * Features
 - Read scripts from package.json
+- Provide built-in defaults (e.g., install) alongside scripts
 - Completion interface for script selection
 - Automatic package manager detection (pnpm/bun/npm)
 - Run scripts using Emacs compilation mode
