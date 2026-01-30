@@ -5,7 +5,7 @@
 ;; Author: darkawower
 ;; URL: https://github.com/darkawower/pkg-run
 ;; Package-Requires: ((emacs "27.1") (transient "0.3.0"))
-;; Version: 0.2.0
+;; Version: 0.2.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -63,6 +63,28 @@ Args-spec defines which args to pass: root, filepath, or none."
   :type '(repeat (list string string function sexp))
   :group 'pkg-run)
 
+(defconst pkg-run--run-commands
+  '((pnpm . "pnpm run")
+    (bun  . "bun run")
+    (npm  . "npm run"))
+  "Alist mapping package manager to run command.")
+
+(defconst pkg-run--install-commands
+  '((pnpm . "pnpm install")
+    (bun  . "bun install")
+    (npm  . "npm install"))
+  "Alist mapping package manager to install command.")
+
+(defconst pkg-run--frozen-install-commands
+  '((pnpm . "pnpm install --frozen-lockfile")
+    (bun  . "bun install --frozen-lockfile")
+    (npm  . "npm ci"))
+  "Alist mapping package manager to frozen install command.")
+
+(defconst pkg-run--cargo-commands
+  '("build" "run" "test" "check" "clean" "doc" "clippy" "fmt" "bench" "fetch")
+  "List of standard cargo commands.")
+
 (defun pkg-run--detect-package-manager (project-root)
   "Detect package manager in PROJECT-ROOT based on lock files."
   (or pkg-run-package-manager
@@ -72,18 +94,18 @@ Args-spec defines which args to pass: root, filepath, or none."
        ((file-exists-p (expand-file-name "bun.lockb" project-root)) 'bun)
        (t 'npm))))
 
-(defconst pkg-run--run-commands
-  '((pnpm . "pnpm run")
-    (bun  . "bun run")
-    (npm  . "npm run"))
-  "Alist mapping package manager to run command.")
-
 (defun pkg-run--package-manager-command (manager)
   "Return command string for MANAGER."
   (alist-get manager pkg-run--run-commands "npm run"))
 
+(defun pkg-run--package-manager-install-command (manager &optional flags)
+  "Return install command string for MANAGER with optional FLAGS."
+  (let ((base-cmd (alist-get manager pkg-run--install-commands "npm install")))
+    (concat base-cmd (when flags (concat " " flags)))))
+
 (defun pkg-run--parse-package-json (root filepath)
-  "Parse scripts from FILEPATH in ROOT, return alist ((name . command) ...)."
+  "Parse scripts from FILEPATH in ROOT.
+Returns list of (name command provider) triples."
   (let* ((json-object-type 'hash-table)
          (json-array-type 'list)
          (json-key-type 'string)
@@ -91,10 +113,11 @@ Args-spec defines which args to pass: root, filepath, or none."
          (scripts (gethash "scripts" json))
          (pm (pkg-run--detect-package-manager root))
          (pm-cmd (pkg-run--package-manager-command pm))
+         (provider (symbol-name pm))
          result)
     (when scripts
       (maphash (lambda (key _value)
-                 (push (cons key (format "%s %s" pm-cmd key)) result))
+                 (push (list key (format "%s %s" pm-cmd key) provider) result))
                scripts))
     (nreverse result)))
 
@@ -124,16 +147,9 @@ Args-spec defines which args to pass: root, filepath, or none."
 
 (defun pkg-run--parse-cargo ()
   "Return standard Cargo commands."
-  '(("build"        . "cargo build")
-    ("build release" . "cargo build --release")
-    ("run"          . "cargo run")
-    ("test"         . "cargo test")
-    ("check"        . "cargo check")
-    ("clean"        . "cargo clean")
-    ("doc"          . "cargo doc")
-    ("clippy"       . "cargo clippy")
-    ("fmt"          . "cargo fmt")
-    ("bench"        . "cargo bench")))
+  (mapcar (lambda (cmd)
+            (cons cmd (format "cargo %s" cmd)))
+          pkg-run--cargo-commands))
 
 (defun pkg-run--build-parser-args (args-spec root filepath)
   "Build argument list from ARGS-SPEC using ROOT and FILEPATH."
@@ -143,20 +159,45 @@ Args-spec defines which args to pass: root, filepath, or none."
               ('filepath filepath)))
           args-spec))
 
-(defun pkg-run--collect-all-commands ()
-  "Collect commands from all found runners.
-Returns alist ((display-key . (command root provider)) ...)."
+(defun pkg-run--collect-builtin-commands ()
   (let (result)
-    (pcase-dolist (`(,file ,provider ,parser ,args-spec) pkg-run-runners)
+    (when-let ((root (pkg-run--find-package-json)))
+      (let ((pm (pkg-run--detect-package-manager root)))
+        (push (cons (format "[%s] install" pm)
+                    (list (pkg-run--package-manager-install-command pm)
+                          root (symbol-name pm)))
+              result)
+        (push (cons (format "[%s] install (frozen)" pm)
+                    (list (alist-get pm pkg-run--frozen-install-commands "npm ci")
+                          root (symbol-name pm)))
+              result)))
+    (when-let ((root (pkg-run--cargo-root)))
+      (dolist (cmd pkg-run--cargo-commands)
+        (push (cons (format "[cargo] %s" cmd)
+                    (list (format "cargo %s" cmd) root "cargo"))
+              result)))
+    (nreverse result)))
+
+(defun pkg-run--collect-all-commands ()
+  (let ((result nil)
+        (builtin-keys nil))
+    (dolist (builtin (pkg-run--collect-builtin-commands))
+      (push builtin result)
+      (push (car builtin) builtin-keys))
+    (pcase-dolist (`(,file ,_provider ,parser ,args-spec) pkg-run-runners)
       (when-let* ((parser (and (functionp parser) parser))
                   (root (locate-dominating-file default-directory file))
                   (filepath (expand-file-name file root)))
         (let* ((args (pkg-run--build-parser-args args-spec root filepath))
                (commands (apply parser args)))
           (dolist (cmd commands)
-            (let ((display-key (format "[%s] %s" provider (car cmd))))
-              (unless (assoc display-key result)
-                (push (cons display-key (list (cdr cmd) root provider)) result)))))))
+            (let* ((name (car cmd))
+                   (command (cadr cmd))
+                   (provider (or (caddr cmd) _provider))
+                   (display-key (format "[%s] %s" provider name)))
+              (unless (or (assoc display-key result)
+                          (member display-key builtin-keys))
+                (push (cons display-key (list command root provider)) result)))))))
     (nreverse result)))
 
 ;;;###autoload
@@ -173,17 +214,6 @@ Returns alist ((display-key . (command root provider)) ...)."
            (root (nth 1 meta))
            (default-directory root))
       (compile command))))
-
-(defconst pkg-run--install-commands
-  '((pnpm . "pnpm install")
-    (bun  . "bun install")
-    (npm  . "npm install"))
-  "Alist mapping package manager to install command.")
-
-(defun pkg-run--package-manager-install-command (manager &optional flags)
-  "Return install command string for MANAGER with optional FLAGS."
-  (let ((base-cmd (alist-get manager pkg-run--install-commands "npm install")))
-    (concat base-cmd (when flags (concat " " flags)))))
 
 (defun pkg-run--find-package-json ()
   "Find the nearest package.json file in current or parent directories."
@@ -204,17 +234,20 @@ TRANSIENT--LAYOUT is ignored but required by transient API."
                 ("i" "Install" pkg-run-npm-install)
                 ("I" "Install (frozen)" pkg-run-npm-install-frozen)]))
      ,@(when (pkg-run--has-file-p "Cargo.toml")
-         (list ["cargo"
-                ("cb" "Build" pkg-run-cargo-build)
-                ("cr" "Run" pkg-run-cargo-run)
-                ("ct" "Test" pkg-run-cargo-test)
-                ("cf" "Fetch deps" pkg-run-cargo-fetch)])))))
+         (list `["cargo"
+                 ,@(mapcar (lambda (cmd)
+                             (list (substring cmd 0 1)
+                                   (capitalize cmd)
+                                   (lambda ()
+                                     (interactive)
+                                     (pkg-run-cargo cmd))))
+                           pkg-run--cargo-commands)])))))
 
 ;;;###autoload
 (transient-define-prefix pkg-run-menu ()
   "Universal project script runner."
   [:class transient-columns
-   :setup-children pkg-run--menu-children])
+          :setup-children pkg-run--menu-children])
 
 (defun pkg-run-npm-install ()
   "Install npm dependencies."
@@ -223,12 +256,6 @@ TRANSIENT--LAYOUT is ignored but required by transient API."
     (let ((default-directory root))
       (compile (pkg-run--package-manager-install-command
                 (pkg-run--detect-package-manager root))))))
-
-(defconst pkg-run--frozen-install-commands
-  '((pnpm . "pnpm install --frozen-lockfile")
-    (bun  . "bun install --frozen-lockfile")
-    (npm  . "npm ci"))
-  "Alist mapping package manager to frozen install command.")
 
 (defun pkg-run-npm-install-frozen ()
   "Install npm dependencies with frozen lockfile."
@@ -244,33 +271,13 @@ TRANSIENT--LAYOUT is ignored but required by transient API."
   "Find Cargo.toml root."
   (locate-dominating-file default-directory "Cargo.toml"))
 
-(defun pkg-run-cargo-build ()
-  "Run cargo build."
-  (interactive)
+(defun pkg-run-cargo (command)
+  "Run cargo COMMAND in project root."
+  (interactive
+   (list (completing-read "Cargo command: " pkg-run--cargo-commands nil t)))
   (when-let ((root (pkg-run--cargo-root)))
     (let ((default-directory root))
-      (compile "cargo build"))))
-
-(defun pkg-run-cargo-run ()
-  "Run cargo run."
-  (interactive)
-  (when-let ((root (pkg-run--cargo-root)))
-    (let ((default-directory root))
-      (compile "cargo run"))))
-
-(defun pkg-run-cargo-test ()
-  "Run cargo test."
-  (interactive)
-  (when-let ((root (pkg-run--cargo-root)))
-    (let ((default-directory root))
-      (compile "cargo test"))))
-
-(defun pkg-run-cargo-fetch ()
-  "Run cargo fetch."
-  (interactive)
-  (when-let ((root (pkg-run--cargo-root)))
-    (let ((default-directory root))
-      (compile "cargo fetch"))))
+      (compile (format "cargo %s" command)))))
 
 ;;;###autoload
 (defalias 'pkg-run 'pkg-run-menu)
